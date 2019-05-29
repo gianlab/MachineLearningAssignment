@@ -1,0 +1,149 @@
+---
+title: "Project Report - Practical Machine Learning Course"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Load packages
+
+```{r load-packages, message = FALSE}
+library(ggplot2)
+library(dplyr)
+library(caret)
+library(scales)
+```
+
+### Load data
+
+```{r load-data}
+
+#pml.training <- read.csv("http://groupware.les.inf.puc-rio.br/static/WLE/WearableComputing_weight_lifting_exercises_biceps_curl_variations.csv", na.strings = c(NA,"","#DIV/0!"))
+
+#pml.training <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", na.strings = c(NA,"","#DIV/0!"))
+
+pml.training <- read.csv("pml-training.csv", na.strings = c(NA,"","#DIV/0!"))
+
+
+```
+
+
+## Part 1: Data
+The data set `pml.training` is comprised of 19622 observations produced and released from this source: http://groupware.les.inf.puc-rio.br/har.
+We have data on 160 different variables, some categorical and some numerical.
+
+For data recording they use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. Participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions: exactly according to the specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E). Class A corresponds to the specified execution of the exercise, while the other 4 classes correspond to common mistakes. The exercises were performed by six male participants aged between 20-28 years, with little weight lifting experience. We made sure that all participants could easily simulate the mistakes in a safe and controlled manner by using a relatively light dumbbell (1.25kg).
+
+```{r}
+
+
+pml.training %>%
+  ggplot(aes(user_name,fill=classe)) +
+  geom_bar(aes(y=(..count../sum(..count..))))+
+  scale_y_continuous(labels = percent_format())+
+  ylab("Percent of exercises") +
+  xlab("User name partecipant ") +
+  ggtitle("Percentage of exercises in the sample by classe")
+```
+
+
+For the Euler angles of each of the four sensors they calculated eight features: mean, variance, standard deviation, max, min, amplitude, kurtosis and skewness, generating in total 96 derived feature sets.
+
+These variables contain numerous missing values (NA) because they concern
+a single sensor excluding the others. Also 7 variables concerning
+the name of the participants, the date of execution of the exercises, etc. are not considered in the following analysis as predictors and therefore are excluded. These variables are:
+
+```{r}
+colnames(pml.training)[1:7]
+which(colMeans(is.na(pml.training))>0.97)
+
+pml.training <- subset(pml.training, select = -c(1:7,which(colMeans(is.na(pml.training))>0.97)))
+
+```
+
+
+
+
+
+## Part 2: Research question
+
+Is it possible to predict to which type of class A, B, C, D, E (predicted variable) a weight lifting exercise will belong, using
+as predictors some of the 52 remaining variables of the data set?
+
+
+## Part 3: Modeling
+
+So we're trying to predict whether weight lifting exercises are of classe A,B,C,D or E. So one thing that we can do right off is use createDataPartition, to separate the data set into training and test sets. If I do this i want a split based on the classe. And I want to create a data set that's 70%, is allocated to the training set, and 30% is allocated to the testing set.
+
+```{r}
+inTrain <- createDataPartition(y=pml.training$classe, p=0.7,list = FALSE)
+training <- pml.training[inTrain,]
+testing <- pml.training[-inTrain,]
+dim(training); dim(testing)
+```
+
+I fit a model using the train command from the caret package with algorithm Random Forest  . I use the tilde and the dot to say use the other 52 variables in this data frame, in order to predict the variable classe .
+
+Of the 52 predictors we choose the most important, using varImp(), a generic function for calculating variable importance for objects produced by train. The 52 variables are sorted by importance:
+
+```{r}
+
+get_vars_importance <-function()
+  {
+      df <- features$importance
+      df <- cbind(df,dimnames(features$importance)[1])
+      names(df)[2]<-"vars"
+      df <-df %>%
+          arrange(desc(Overall)) %>%
+          select(vars,Overall) 
+      return(df)
+  }
+
+set.seed(1234)
+modelFit <- train(classe ~ ., data = training, method="rf", ntree =10)
+predictions <- predict(modelFit, newdata = testing)
+conf <-confusionMatrix(predictions,testing$classe)
+features <- varImp(modelFit)
+print(conf$overall[1])
+
+df <- get_vars_importance()
+df
+
+```
+
+
+
+The following for loop selects the first 7 variables by importance, fit model with Random Forest algorithm and calculates Accuracy of Confusion Matrix, so as to select the model with the greater Accuracy.
+
+
+```{r}
+
+for (i in 2:7) {
+  
+    var_temp <-df$vars[1:i]
+    f <- paste ( 'classe' ,paste(var_temp, collapse = ' + ' ), sep = ' ~ ')
+  
+    modelFit <- train(x=training[,as.character(var_temp)], y=training[,c("classe")] , form=f , data = training, method="rf", ntree =10)
+    predictions <- predict(modelFit, newdata = testing)
+    conf <-confusionMatrix(predictions,testing$classe)
+    print(f)
+    print(conf$overall[1])
+    
+    df <- get_vars_importance()  
+  
+}
+
+```
+
+The final model is what it has as predictors variables: __roll_belt, pitch_forearm, yaw_belt, roll_forearm, magnet_dumbbell_z,  magnet_dumbbell_y, pitch_belt__ , in fact this model has an __Accuracy di 0.9765506  with 95% Confidence Interval : (0.9812, 0.9877)__ .
+
+
+```{r}
+modelFit <- train(classe ~ roll_belt + pitch_forearm + yaw_belt + roll_forearm + magnet_dumbbell_z + magnet_dumbbell_y + pitch_belt, data = training, method="rf", ntree =100)
+predictions <- predict(modelFit, newdata = testing)
+confusionMatrix(predictions,testing$classe)
+```
+
+
